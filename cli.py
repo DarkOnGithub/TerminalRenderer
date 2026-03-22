@@ -7,7 +7,7 @@ from video_demo import DEFAULT_VIDEO_PATH, main as video_demo_main
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="ANSI renderer demo router.")
+    parser = argparse.ArgumentParser(description="TerminalRenderer demo router.")
     subparsers = parser.add_subparsers(dest="demo", required=True)
 
     video_parser = subparsers.add_parser("video", help="Play the video demo")

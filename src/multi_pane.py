@@ -802,7 +802,7 @@ class MultiPaneRenderer:
         self.session_dir = (
             resolve_path(session_dir)
             if session_dir
-            else tempfile.mkdtemp(prefix="ansi-renderer-session-")
+            else tempfile.mkdtemp(prefix="terminal-renderer-session-")
         )
         session_file = os.path.join(self.session_dir, "session.json")
         self.launched_session = not os.path.exists(session_file)

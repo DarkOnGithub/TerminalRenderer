@@ -1585,7 +1585,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     session_dir = (
         resolve_path(args.session_dir)
         if args.session_dir
-        else tempfile.mkdtemp(prefix="ansi-renderer-session-")
+        else tempfile.mkdtemp(prefix="terminal-renderer-session-")
     )
     session_file = os.path.join(session_dir, "session.json")
     launched_session = not os.path.exists(session_file)

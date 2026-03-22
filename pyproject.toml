@@ -1,7 +1,7 @@
 [project]
-name = "ansi-renderer"
+name = "terminal-renderer"
 version = "0.1.0"
-description = "High-performance ANSI video renderer using PyTorch and Triton"
+description = "High-performance terminal video renderer using PyTorch and Triton"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -13,4 +13,4 @@ dependencies = [
 ]
 
 [project.scripts]
-ansi-renderer-demo = "cli:main"
+terminal-renderer-demo = "cli:main"

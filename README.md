@@ -1,6 +1,6 @@
-# ANSI Renderer
+# TerminalRenderer
 
-ANSI Renderer is a GPU-accelerated terminal video renderer built with PyTorch + Triton.
+TerminalRenderer is a GPU-accelerated terminal video renderer built with PyTorch + Triton.
 It renders RGB frames as ANSI escape sequences and streams them directly to your terminal.
 In practice, it can handle 720p-equivalent output and 1080p vertical content (hardware and terminal dependent).
 
@@ -94,10 +94,10 @@ uv pip install -e .
 Use the shared CLI to choose the demo and whether it renders in one terminal or a multi-pane launcher session:
 
 ```bash
-uv run ansi-renderer-demo video --terminal-mode single
-uv run ansi-renderer-demo video --terminal-mode multi -- path/to/video.mp4 --stats-interval 0.5
-uv run ansi-renderer-demo object --terminal-mode single
-uv run ansi-renderer-demo object --terminal-mode multi -- --width 1280 --height 720
+uv run terminal-renderer-demo video --terminal-mode single
+uv run terminal-renderer-demo video --terminal-mode multi -- path/to/video.mp4 --stats-interval 0.5
+uv run terminal-renderer-demo object --terminal-mode single
+uv run terminal-renderer-demo object --terminal-mode multi -- --width 1280 --height 720
 ```
 
 Arguments after `--` are forwarded to the selected demo.

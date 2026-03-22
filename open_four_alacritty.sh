@@ -49,15 +49,15 @@ else
     mkdir -p "$session_dir"
 fi
 
-plugin_name="ansi_renderer_tile_four_alacritty_$$"
-top_left_title="ANSI Renderer Top Left"
-top_right_title="ANSI Renderer Top Right"
-bottom_left_title="ANSI Renderer Bottom Left"
-bottom_right_title="ANSI Renderer Bottom Right"
-top_left_class="ansi-renderer-top-left"
-top_right_class="ansi-renderer-top-right"
-bottom_left_class="ansi-renderer-bottom-left"
-bottom_right_class="ansi-renderer-bottom-right"
+plugin_name="terminal_renderer_tile_four_alacritty_$$"
+top_left_title="TerminalRenderer Top Left"
+top_right_title="TerminalRenderer Top Right"
+bottom_left_title="TerminalRenderer Bottom Left"
+bottom_right_title="TerminalRenderer Bottom Right"
+top_left_class="terminal-renderer-top-left"
+top_right_class="terminal-renderer-top-right"
+bottom_left_class="terminal-renderer-bottom-left"
+bottom_right_class="terminal-renderer-bottom-right"
 
 kwin_script=$(mktemp)
 cleanup() {
