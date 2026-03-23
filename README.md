@@ -15,7 +15,7 @@ Notes:
 
 ## Demos
 
-<img src="https://github.com/user-attachments/assets/0991a9a2-b65a-462a-bd22-da86c4ae1fe9" width="480" alt="TerminalRenderer demo" />
+<img src="assets/output.gif" width="480" alt="TerminalRenderer demo" />
 
 ### Yaosobi - Idol
 
@@ -24,14 +24,13 @@ Notes:
 Source: https://youtu.be/7995X3B275g
 
 ### 3D Cube
-
-<video src="https://github.com/user-attachments/assets/3c7ba2d2-8e33-474b-ac3c-54801b48787e" controls width="480"></video>
+<video src="https://github.com/user-attachments/assets/0991a9a2-b65a-462a-bd22-da86c4ae1fe9" controls width="480"></video>
 
 Source: https://youtu.be/7Zr2gqd8iPI
 
 ### Bad Apple
 
-<video src="assets/bad_apple.mp4" controls width="480"></video>
+<video src="https://github.com/user-attachments/assets/3c7ba2d2-8e33-474b-ac3c-54801b48787e" controls width="480"></video>
 
 Source: https://youtu.be/EVdXZdDUfWs
 
