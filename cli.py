@@ -2,6 +2,7 @@ import argparse
 from typing import Sequence
 
 from example.object import main as object_demo_main
+from example.shader import main as shader_demo_main
 from multi_terminal_player import main as multi_terminal_main
 from video_demo import DEFAULT_VIDEO_PATH, main as video_demo_main
 
@@ -35,6 +36,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Additional args for the cube demo. Prefix with --.",
     )
 
+    shader_parser = subparsers.add_parser("shader", help="Play the shader demo")
+    shader_parser.add_argument(
+        "--terminal-mode",
+        choices=("single", "multi"),
+        default="single",
+    )
+    shader_parser.add_argument(
+        "extra_args",
+        nargs=argparse.REMAINDER,
+        help="Additional args for the shader demo. Prefix with --.",
+    )
+
     return parser.parse_args(argv)
 
 
@@ -50,6 +63,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.terminal_mode == "multi":
             return multi_terminal_main([str(args.video_path), *extra_args])
         return video_demo_main([str(args.video_path), *extra_args])
+
+    if args.demo == "shader":
+        return shader_demo_main(
+            [
+                "--terminal-mode",
+                str(args.terminal_mode),
+                *extra_args,
+            ]
+        )
 
     return object_demo_main(
         [
