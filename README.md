@@ -15,11 +15,31 @@ Notes:
 
 ## Demos
 
-- [![3D Cube Demo](Cube.gif)](https://youtu.be/7Zr2gqd8iPI)
-- Yaosobi - Idol: https://youtu.be/7995X3B275g
-- 3D Cube: https://youtu.be/7Zr2gqd8iPI
-- Bad Apple: https://youtu.be/EVdXZdDUfWs
-- Multi-pane example: https://www.youtube.com/watch?v=ftHQEd0QApc
+<img src="assets/output.gif" width="360" alt="TerminalRenderer demo" />
+
+### Yaosobi - Idol
+
+<video src="assets/idol.mp4" controls width="360"></video>
+
+Source: https://youtu.be/7995X3B275g
+
+### 3D Cube
+
+<video src="assets/3d_cube.mp4" controls width="360"></video>
+
+Source: https://youtu.be/7Zr2gqd8iPI
+
+### Bad Apple
+
+<video src="assets/bad_apple.mp4" controls width="360"></video>
+
+Source: https://youtu.be/EVdXZdDUfWs
+
+### Multi-pane example
+
+<video src="assets/multi_pane.mp4" controls width="360"></video>
+
+Source: https://www.youtube.com/watch?v=ftHQEd0QApc
 
 ## Requirements
 
@@ -98,6 +118,8 @@ uv run terminal-renderer-demo video --terminal-mode single
 uv run terminal-renderer-demo video --terminal-mode multi -- path/to/video.mp4 --stats-interval 0.5
 uv run terminal-renderer-demo object --terminal-mode single
 uv run terminal-renderer-demo object --terminal-mode multi -- --width 1280 --height 720
+uv run terminal-renderer-demo shader --terminal-mode single
+uv run terminal-renderer-demo shader --terminal-mode multi -- example/shaders/plasma.frag --width 1280 --height 720
 ```
 
 Arguments after `--` are forwarded to the selected demo.
@@ -122,6 +144,30 @@ uv run python -m example.object --terminal-mode multi
 ```
 
 This is a procedural GPU-rendered cube scene and it can now render to either a single terminal or the reusable multi-pane path.
+
+### Shader demo (`example/shader.py`)
+
+```bash
+uv run python -m example.shader
+uv run python -m example.shader example/shaders/plasma.frag --terminal-mode multi
+```
+
+This demo renders an offscreen GLSL fragment shader with `moderngl`, reads the result back as an `H x W x 3` RGB frame, and feeds that frame into TerminalRenderer.
+
+Shader files can be either regular GLSL fragment shaders or simple Shadertoy-style shaders. The wrapper provides these uniforms when referenced:
+
+```glsl
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform vec3 iResolution;
+uniform float iTime;
+uniform float iTimeDelta;
+uniform int iFrame;
+uniform float iFrameRate;
+uniform vec4 iMouse;
+```
+
+It also supports shaders that define `mainImage(out vec4 fragColor, in vec2 fragCoord)` and shaders that write to `gl_FragColor`.
 
 ### Timing analysis
 
@@ -182,3 +228,4 @@ Set `stats_interval` to print reusable multi-pane runtime stats to stderr every 
 - `cli.py`: demo router for single-terminal vs multi-pane playback
 - `video_demo.py`: single-terminal video playback demo
 - `example/object.py`: procedural cube demo
+- `example/shader.py`: offscreen GLSL shader demo via ModernGL
