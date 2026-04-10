@@ -271,13 +271,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--diff-thresh",
         type=int,
-        default=8,
+        default=1,
         help="Minimum per-channel cell color delta before a cell is treated as changed",
     )
     parser.add_argument(
         "--run-color-diff-thresh",
         type=int,
-        default=8,
+        default=1,
         help="Minimum per-channel run color delta before starting a new ANSI style run",
     )
     parser.add_argument(
