@@ -7,11 +7,9 @@ In practice, it can handle 720p-equivalent output and 1080p vertical content (ha
 Current render modes in this repo:
 - `pixel`
 - `quadrant`
-- `octant` (experimental)
 
 Notes:
 - This project currently targets CUDA/NVIDIA workflows.
-- `octant` relies on Unicode block-octant glyphs and is terminal/font dependent. In practice, keep `quadrant` as the safe default and use `octant` only when your terminal/font stack renders those symbols correctly.
 
 ## Demos
 

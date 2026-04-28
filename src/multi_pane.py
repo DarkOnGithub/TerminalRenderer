@@ -235,11 +235,6 @@ def pane_target_size(config: Config, columns: int, lines: int) -> tuple[int, int
     if config.render_mode == "quadrant":
         factor = max(1, int(config.quadrant_cell_divisor))
         return columns * factor, lines * factor
-    if config.render_mode == "octant":
-        return (
-            columns * max(1, int(config.octant_cell_width_divisor)),
-            lines * max(1, int(config.octant_cell_height_divisor)),
-        )
     raise ValueError(f"Unsupported render mode: {config.render_mode}")
 
 
@@ -355,15 +350,6 @@ def pane_cell_bounds(spec: PaneSpec, config: Config) -> tuple[int, int, int, int
             spec.x1 // divisor,
             spec.y0 // divisor,
             spec.y1 // divisor,
-        )
-    if config.render_mode == "octant":
-        x_divisor = max(1, int(config.octant_cell_width_divisor))
-        y_divisor = max(1, int(config.octant_cell_height_divisor))
-        return (
-            spec.x0 // x_divisor,
-            spec.x1 // x_divisor,
-            spec.y0 // y_divisor,
-            spec.y1 // y_divisor,
         )
     raise ValueError(f"Unsupported render mode: {config.render_mode}")
 
@@ -515,12 +501,6 @@ def _get_flush_executor() -> ThreadPoolExecutor:
     if _FLUSH_EXECUTOR is None:
         _FLUSH_EXECUTOR = ThreadPoolExecutor(max_workers=len(PANE_ORDER))
     return _FLUSH_EXECUTOR
-
-
-def _new_gpu_segment() -> tuple[torch.cuda.Event, torch.cuda.Event] | None:
-    if not torch.cuda.is_available():
-        return None
-    return torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
 
 
 def payload_bytes(payloads: list[PanePayload]) -> int:

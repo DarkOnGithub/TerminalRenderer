@@ -16,7 +16,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from src.ansi_renderer import AnsiRenderer, GpuBuildTiming
+from src.ansi_renderer import AnsiRenderer
 from src.ansi_generator import ansi_generate
 from src.config import (
     CELL_ASPECT,
@@ -94,7 +94,6 @@ class PanePayload:
     payload_ref: object | None
     payload_view: memoryview | None
     copy_done_event: torch.cuda.Event | None
-    gpu_build_timing: GpuBuildTiming | None
     next_previous_frame: torch.Tensor
 
 
@@ -121,16 +120,12 @@ class RuntimeStats:
     fetch_time_sum: float = 0.0
     upload_time_sum: float = 0.0
     build_time_sum: float = 0.0
-    gpu_build_time_sum: float = 0.0
-    gpu_preprocess_time_sum: float = 0.0
-    gpu_gen_time_sum: float = 0.0
     sleep_time_sum: float = 0.0
     flush_time_sum: float = 0.0
     lateness_sum: float = 0.0
     total_payload_bytes: int = 0
     pane_payload_bytes: dict[str, int] = field(default_factory=dict)
     pane_build_time_sum: dict[str, float] = field(default_factory=dict)
-    pane_gpu_build_time_sum: dict[str, float] = field(default_factory=dict)
     pane_flush_time_sum: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -138,8 +133,6 @@ class RuntimeStats:
             self.pane_payload_bytes = {pane_id: 0 for pane_id in self.pane_ids}
         if not self.pane_build_time_sum:
             self.pane_build_time_sum = {pane_id: 0.0 for pane_id in self.pane_ids}
-        if not self.pane_gpu_build_time_sum:
-            self.pane_gpu_build_time_sum = {pane_id: 0.0 for pane_id in self.pane_ids}
         if not self.pane_flush_time_sum:
             self.pane_flush_time_sum = {pane_id: 0.0 for pane_id in self.pane_ids}
 
@@ -151,11 +144,7 @@ class RuntimeStats:
         fetch_time: float,
         upload_time: float,
         build_time: float,
-        gpu_build_time: float,
-        gpu_preprocess_time: float,
-        gpu_gen_time: float,
         pane_build_times: dict[str, float],
-        pane_gpu_build_times: dict[str, float],
         sleep_time: float,
         flush_stats: FlushStats,
         lateness: float,
@@ -170,9 +159,6 @@ class RuntimeStats:
         self.fetch_time_sum += fetch_time
         self.upload_time_sum += upload_time
         self.build_time_sum += build_time
-        self.gpu_build_time_sum += gpu_build_time
-        self.gpu_preprocess_time_sum += gpu_preprocess_time
-        self.gpu_gen_time_sum += gpu_gen_time
         self.sleep_time_sum += sleep_time
         self.flush_time_sum += flush_stats.total_time
         self.lateness_sum += lateness
@@ -184,9 +170,6 @@ class RuntimeStats:
             self.pane_payload_bytes[pane_id] += pane_bytes
             self.pane_build_time_sum[pane_id] += float(
                 pane_build_times.get(pane_id, 0.0)
-            )
-            self.pane_gpu_build_time_sum[pane_id] += float(
-                pane_gpu_build_times.get(pane_id, 0.0)
             )
             self.pane_flush_time_sum[pane_id] += float(
                 flush_stats.per_pane_times.get(pane_id, 0.0)
@@ -201,9 +184,6 @@ class RuntimeStats:
         self.fetch_time_sum = 0.0
         self.upload_time_sum = 0.0
         self.build_time_sum = 0.0
-        self.gpu_build_time_sum = 0.0
-        self.gpu_preprocess_time_sum = 0.0
-        self.gpu_gen_time_sum = 0.0
         self.sleep_time_sum = 0.0
         self.flush_time_sum = 0.0
         self.lateness_sum = 0.0
@@ -211,7 +191,6 @@ class RuntimeStats:
         for pane_id in self.pane_ids:
             self.pane_payload_bytes[pane_id] = 0
             self.pane_build_time_sum[pane_id] = 0.0
-            self.pane_gpu_build_time_sum[pane_id] = 0.0
             self.pane_flush_time_sum[pane_id] = 0.0
 
 
@@ -234,7 +213,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--render-mode",
-        choices=("pixel", "quadrant", "octant"),
+        choices=("pixel", "quadrant"),
         default="quadrant",
         help="ANSI render mode for each pane",
     )
@@ -243,18 +222,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         default=2,
         help="Cell divisor used for quadrant mode",
-    )
-    parser.add_argument(
-        "--octant-cell-width-divisor",
-        type=int,
-        default=2,
-        help="Cell width divisor used for octant mode",
-    )
-    parser.add_argument(
-        "--octant-cell-height-divisor",
-        type=int,
-        default=4,
-        help="Cell height divisor used for octant mode",
     )
     parser.add_argument(
         "--audio-delay",
@@ -288,10 +255,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "Cursor addressing mode for ANSI output; absolute is usually faster "
             "for multi-pane playback"
         ),
-    )
-    parser.add_argument(
-        "--timing-file",
-        help="Optional CSV path for per-frame timing data",
     )
     parser.add_argument(
         "--stats-interval",
@@ -408,19 +371,12 @@ def pane_target_size(
     lines: int,
     render_mode: str,
     quadrant_cell_divisor: int,
-    octant_cell_width_divisor: int,
-    octant_cell_height_divisor: int,
 ) -> tuple[int, int]:
     if render_mode == "pixel":
         return columns, lines
     if render_mode == "quadrant":
         factor = max(1, int(quadrant_cell_divisor))
         return columns * factor, lines * factor
-    if render_mode == "octant":
-        return (
-            columns * max(1, int(octant_cell_width_divisor)),
-            lines * max(1, int(octant_cell_height_divisor)),
-        )
     raise ValueError(f"Unsupported render mode: {render_mode}")
 
 
@@ -439,32 +395,24 @@ def build_pane_specs(
         int(top_left["lines"]),
         args.render_mode,
         args.quadrant_cell_divisor,
-        args.octant_cell_width_divisor,
-        args.octant_cell_height_divisor,
     )
     tr_width, tr_height = pane_target_size(
         int(top_right["columns"]),
         int(top_right["lines"]),
         args.render_mode,
         args.quadrant_cell_divisor,
-        args.octant_cell_width_divisor,
-        args.octant_cell_height_divisor,
     )
     bl_width, bl_height = pane_target_size(
         int(bottom_left["columns"]),
         int(bottom_left["lines"]),
         args.render_mode,
         args.quadrant_cell_divisor,
-        args.octant_cell_width_divisor,
-        args.octant_cell_height_divisor,
     )
     br_width, br_height = pane_target_size(
         int(bottom_right["columns"]),
         int(bottom_right["lines"]),
         args.render_mode,
         args.quadrant_cell_divisor,
-        args.octant_cell_width_divisor,
-        args.octant_cell_height_divisor,
     )
 
     left_width = tl_width
@@ -623,33 +571,13 @@ def build_configured_renderer(
         fps=fps,
         render_mode=str(args.render_mode),
         quadrant_cell_divisor=int(args.quadrant_cell_divisor),
-        octant_cell_width_divisor=int(args.octant_cell_width_divisor),
-        octant_cell_height_divisor=int(args.octant_cell_height_divisor),
         quant_mask=0xFF,
         diff_thresh=int(args.diff_thresh),
         run_color_diff_thresh=int(args.run_color_diff_thresh),
-        adaptive_quality=False,
-        adaptive_quant_masks=(0xFF,),
-        adaptive_diff_thresh_offsets=(0,),
-        adaptive_run_color_diff_offsets=(0,),
-        adaptive_ema_alpha=0.12,
-        target_frame_bytes=0,
-        frame_byte_buffer_frames=8,
-        max_frame_bytes=0,
         relative_cursor_moves=str(args.cursor_moves).lower() == "relative",
         use_rep=True,
         rep_min_run=12,
         sync_output=False,
-        prefer_writev=True,
-        write_chunk_size=2_097_152,
-        queue_size=12,
-        buffer_pool_size=14,
-        initial_buffer_size=16 * 1024 * 1024,
-        async_copy_stream=True,
-        pacing_render_lead=True,
-        pacing_render_alpha=0.18,
-        timing_enabled=False,
-        timing_file="timing.csv",
     )
     return AnsiRenderer(empty_frame_generator(), config, autostart=False)
 
@@ -749,8 +677,6 @@ def pane_cell_bounds(
     spec: PaneSpec,
     render_mode: str,
     quadrant_cell_divisor: int,
-    octant_cell_width_divisor: int,
-    octant_cell_height_divisor: int,
 ) -> tuple[int, int, int, int]:
     if render_mode == "pixel":
         return spec.x0, spec.x1, spec.y0, spec.y1
@@ -762,24 +688,7 @@ def pane_cell_bounds(
             spec.y0 // divisor,
             spec.y1 // divisor,
         )
-    if render_mode == "octant":
-        x_divisor = max(1, int(octant_cell_width_divisor))
-        y_divisor = max(1, int(octant_cell_height_divisor))
-        return (
-            spec.x0 // x_divisor,
-            spec.x1 // x_divisor,
-            spec.y0 // y_divisor,
-            spec.y1 // y_divisor,
-        )
     raise ValueError(f"Unsupported render mode: {render_mode}")
-
-
-def _new_gpu_segment() -> tuple[torch.cuda.Event, torch.cuda.Event] | None:
-    if not torch.cuda.is_available():
-        return None
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
-    return start_event, end_event
 
 
 def tensor_payload_view(
@@ -828,67 +737,19 @@ def payload_bytes_by_pane(payloads: list[PanePayload]) -> dict[str, int]:
     return totals
 
 
-def gpu_build_times_by_pane(payloads: list[PanePayload]) -> dict[str, float]:
-    totals: dict[str, float] = {}
-    for payload in payloads:
-        pane_id = payload.pane.spec.pane_id
-        timing = payload.gpu_build_timing
-        if timing is None:
-            totals[pane_id] = 0.0
-            continue
-        if payload.copy_done_event is None:
-            timing.synchronize()
-        totals[pane_id] = timing.total_ms() / 1000.0
-    return totals
-
-
-def gpu_gen_times_by_pane(payloads: list[PanePayload]) -> dict[str, float]:
-    totals: dict[str, float] = {}
-    for payload in payloads:
-        pane_id = payload.pane.spec.pane_id
-        timing = payload.gpu_build_timing
-        if timing is None:
-            totals[pane_id] = 0.0
-            continue
-        if payload.copy_done_event is None:
-            timing.synchronize()
-        totals[pane_id] = timing.gen_ms() / 1000.0
-    return totals
-
-
-def shared_gpu_build_time(timing: GpuBuildTiming | None) -> float:
-    if timing is None:
-        return 0.0
-    timing.synchronize()
-    return timing.total_ms() / 1000.0
-
-
-def shared_gpu_preprocess_time(timing: GpuBuildTiming | None) -> float:
-    if timing is None:
-        return 0.0
-    timing.synchronize()
-    return timing.preprocess_ms() / 1000.0
-
-
 def build_pane_payloads_with_stats(
     panes: list[PaneRuntime],
     canvas: torch.Tensor,
-) -> tuple[list[PanePayload], dict[str, float], dict[str, GpuBuildTiming | None]]:
+) -> tuple[list[PanePayload], dict[str, float]]:
     payloads: list[PanePayload] = []
     pane_build_times = {pane.spec.pane_id: 0.0 for pane in panes}
-    pane_gpu_build_timings: dict[str, GpuBuildTiming | None] = {
-        pane.spec.pane_id: None for pane in panes
-    }
     for pane in panes:
         pane_build_start = time.perf_counter()
         crop = canvas[pane.spec.y0 : pane.spec.y1, pane.spec.x0 : pane.spec.x1]
         previous_frame = clone_previous_frame(pane)
-        payload_result = pane.renderer.build_frame_payload(previous_frame, crop)
-        payload, updated_previous, *payload_meta = payload_result
-        gpu_build_timing = None
-        if payload_meta and isinstance(payload_meta[-1], GpuBuildTiming):
-            gpu_build_timing = payload_meta[-1]
-        pane_gpu_build_timings[pane.spec.pane_id] = gpu_build_timing
+        payload, updated_previous = pane.renderer.build_frame_payload(
+            previous_frame, crop
+        )
         if payload is None:
             payloads.append(
                 PanePayload(
@@ -896,7 +757,6 @@ def build_pane_payloads_with_stats(
                     payload_ref=None,
                     payload_view=None,
                     copy_done_event=None,
-                    gpu_build_timing=gpu_build_timing,
                     next_previous_frame=updated_previous,
                 )
             )
@@ -911,12 +771,11 @@ def build_pane_payloads_with_stats(
                 payload_ref=payload_ref,
                 payload_view=payload_view,
                 copy_done_event=copy_done_event,
-                gpu_build_timing=gpu_build_timing,
                 next_previous_frame=updated_previous,
             )
         )
         pane_build_times[pane.spec.pane_id] += time.perf_counter() - pane_build_start
-    return payloads, pane_build_times, pane_gpu_build_timings
+    return payloads, pane_build_times
 
 
 def build_shared_pane_payloads_with_stats(
@@ -924,16 +783,10 @@ def build_shared_pane_payloads_with_stats(
     runtime: SharedBuildRuntime,
     canvas: torch.Tensor,
     args: argparse.Namespace,
-) -> tuple[list[PanePayload], dict[str, float], GpuBuildTiming | None, torch.Tensor]:
+) -> tuple[list[PanePayload], dict[str, float], torch.Tensor]:
     config = runtime.renderer.config
     previous_frame = runtime.previous_frame
 
-    preprocess_gpu_timing = GpuBuildTiming() if runtime.renderer.cuda_enabled else None
-    preprocess_segment = (
-        _new_gpu_segment() if preprocess_gpu_timing is not None else None
-    )
-    if preprocess_segment is not None:
-        preprocess_segment[0].record(torch.cuda.current_stream(device=config.device))
     xs, ys, colors_rgb, updated_previous = pre_process_frame(
         previous_frame,
         canvas,
@@ -941,9 +794,6 @@ def build_shared_pane_payloads_with_stats(
         quant_mask=int(config.quant_mask),
         diff_thresh_override=int(config.diff_thresh),
     )
-    if preprocess_segment is not None and preprocess_gpu_timing is not None:
-        preprocess_segment[1].record(torch.cuda.current_stream(device=config.device))
-        preprocess_gpu_timing.preprocess_segments.append(preprocess_segment)
 
     payloads: list[PanePayload] = []
     pane_build_times = {pane.spec.pane_id: 0.0 for pane in panes}
@@ -954,8 +804,6 @@ def build_shared_pane_payloads_with_stats(
             pane.spec,
             str(args.render_mode).lower(),
             int(args.quadrant_cell_divisor),
-            int(args.octant_cell_width_divisor),
-            int(args.octant_cell_height_divisor),
         )
         for pane in panes
     }
@@ -981,7 +829,6 @@ def build_shared_pane_payloads_with_stats(
         pane_id = pane.spec.pane_id
         x0, x1, y0, y1 = pane_bounds[pane_id]
         next_previous_frame = updated_previous[y0:y1, x0:x1]
-        pane_gpu_timing = GpuBuildTiming() if runtime.renderer.cuda_enabled else None
 
         if xs.numel() == 0:
             payloads.append(
@@ -990,7 +837,6 @@ def build_shared_pane_payloads_with_stats(
                     payload_ref=None,
                     payload_view=None,
                     copy_done_event=None,
-                    gpu_build_timing=pane_gpu_timing,
                     next_previous_frame=next_previous_frame,
                 )
             )
@@ -1012,7 +858,6 @@ def build_shared_pane_payloads_with_stats(
                     payload_ref=None,
                     payload_view=None,
                     copy_done_event=None,
-                    gpu_build_timing=pane_gpu_timing,
                     next_previous_frame=next_previous_frame,
                 )
             )
@@ -1030,11 +875,6 @@ def build_shared_pane_payloads_with_stats(
             current_stream = torch.cuda.current_stream(device=config.device)
             with torch.cuda.stream(build_stream):
                 build_stream.wait_stream(current_stream)
-                gen_segment = (
-                    _new_gpu_segment() if pane_gpu_timing is not None else None
-                )
-                if gen_segment is not None:
-                    gen_segment[0].record(build_stream)
                 payload = ansi_generate(
                     pane_xs,
                     pane_ys,
@@ -1046,9 +886,6 @@ def build_shared_pane_payloads_with_stats(
                         pane.renderer.config.run_color_diff_thresh
                     ),
                 )
-                if gen_segment is not None and pane_gpu_timing is not None:
-                    gen_segment[1].record(build_stream)
-                    pane_gpu_timing.gen_segments.append(gen_segment)
 
                 old_shape = (
                     pane.previous_frame.shape
@@ -1070,9 +907,6 @@ def build_shared_pane_payloads_with_stats(
                     pane, payload
                 )
         else:
-            gen_segment = _new_gpu_segment() if pane_gpu_timing is not None else None
-            if gen_segment is not None:
-                gen_segment[0].record(torch.cuda.current_stream(device=config.device))
             payload = ansi_generate(
                 pane_xs,
                 pane_ys,
@@ -1084,9 +918,6 @@ def build_shared_pane_payloads_with_stats(
                     pane.renderer.config.run_color_diff_thresh
                 ),
             )
-            if gen_segment is not None and pane_gpu_timing is not None:
-                gen_segment[1].record(torch.cuda.current_stream(device=config.device))
-                pane_gpu_timing.gen_segments.append(gen_segment)
 
             old_shape = (
                 pane.previous_frame.shape if pane.previous_frame is not None else None
@@ -1111,13 +942,12 @@ def build_shared_pane_payloads_with_stats(
                 payload_ref=payload_ref,
                 payload_view=payload_view,
                 copy_done_event=copy_done_event,
-                gpu_build_timing=pane_gpu_timing,
                 next_previous_frame=next_previous_frame,
             )
         )
         pane_build_times[pane.spec.pane_id] += time.perf_counter() - pane_build_start
 
-    return payloads, pane_build_times, preprocess_gpu_timing, updated_previous
+    return payloads, pane_build_times, updated_previous
 
 
 def commit_pane_payloads(payloads: list[PanePayload]) -> None:
@@ -1256,73 +1086,6 @@ def flush_pane_payloads(
     )
 
 
-def timing_csv_header(pane_ids: tuple[str, ...]) -> str:
-    columns = [
-        "frame_idx",
-        "dropped",
-        "skipped_input_frames",
-        "fetch_time",
-        "upload_time",
-        "build_time",
-        "gpu_build_time",
-        "render_sleep",
-        "flush_time",
-        "lateness",
-        "total_payload_bytes",
-    ]
-    columns.extend(f"{pane_id}_build_time" for pane_id in pane_ids)
-    columns.extend(f"{pane_id}_gpu_build_time" for pane_id in pane_ids)
-    columns.extend(f"{pane_id}_bytes" for pane_id in pane_ids)
-    columns.extend(f"{pane_id}_flush_time" for pane_id in pane_ids)
-    return ",".join(columns) + "\n"
-
-
-def timing_csv_row(
-    frame_idx: int,
-    dropped: bool,
-    skipped_input_frames: int,
-    fetch_time: float,
-    upload_time: float,
-    build_time: float,
-    gpu_build_time: float,
-    pane_build_times: dict[str, float],
-    pane_gpu_build_times: dict[str, float],
-    sleep_time: float,
-    flush_stats: FlushStats,
-    lateness: float,
-    payload_bytes: dict[str, int],
-    pane_ids: tuple[str, ...],
-) -> str:
-    total_payload_bytes = sum(
-        int(payload_bytes.get(pane_id, 0)) for pane_id in pane_ids
-    )
-    values: list[str] = [
-        str(frame_idx),
-        "1" if dropped else "0",
-        str(max(0, int(skipped_input_frames))),
-        f"{fetch_time:.6f}",
-        f"{upload_time:.6f}",
-        f"{build_time:.6f}",
-        f"{gpu_build_time:.6f}",
-        f"{sleep_time:.6f}",
-        f"{flush_stats.total_time:.6f}",
-        f"{lateness:.6f}",
-        str(total_payload_bytes),
-    ]
-    values.extend(
-        f"{float(pane_build_times.get(pane_id, 0.0)):.6f}" for pane_id in pane_ids
-    )
-    values.extend(
-        f"{float(pane_gpu_build_times.get(pane_id, 0.0)):.6f}" for pane_id in pane_ids
-    )
-    values.extend(str(int(payload_bytes.get(pane_id, 0))) for pane_id in pane_ids)
-    values.extend(
-        f"{float(flush_stats.per_pane_times.get(pane_id, 0.0)):.6f}"
-        for pane_id in pane_ids
-    )
-    return ",".join(values) + "\n"
-
-
 def emit_runtime_stats(
     stats: RuntimeStats,
     now: float,
@@ -1343,11 +1106,6 @@ def emit_runtime_stats(
     avg_build_ms = (
         1000.0 * stats.build_time_sum / max(stats.presented + stats.dropped, 1)
     )
-    avg_gpu_build_ms = 1000.0 * stats.gpu_build_time_sum / max(stats.presented, 1)
-    avg_gpu_preprocess_ms = (
-        1000.0 * stats.gpu_preprocess_time_sum / max(stats.presented, 1)
-    )
-    avg_gpu_gen_ms = 1000.0 * stats.gpu_gen_time_sum / max(stats.presented, 1)
     avg_flush_ms = 1000.0 * stats.flush_time_sum / max(stats.presented, 1)
     avg_lateness_ms = 1000.0 * stats.lateness_sum / max(stats.presented, 1)
     avg_bytes = stats.total_payload_bytes / max(stats.presented, 1)
@@ -1358,15 +1116,6 @@ def emit_runtime_stats(
     slowest_build_ms = (
         1000.0
         * stats.pane_build_time_sum.get(slowest_build_pane, 0.0)
-        / max(stats.presented, 1)
-    )
-    slowest_gpu_build_pane = max(
-        stats.pane_ids,
-        key=lambda pane_id: stats.pane_gpu_build_time_sum.get(pane_id, 0.0),
-    )
-    slowest_gpu_build_ms = (
-        1000.0
-        * stats.pane_gpu_build_time_sum.get(slowest_gpu_build_pane, 0.0)
         / max(stats.presented, 1)
     )
     slowest_pane = max(
@@ -1386,11 +1135,9 @@ def emit_runtime_stats(
         (
             f"stats shown_fps={shown_fps:.1f}/{fps:.1f} dropped_fps={dropped_fps:.1f} "
             f"skipped_input_fps={skipped_input_fps:.1f} avg_fetch_ms={avg_fetch_ms:.1f} "
-            f"avg_upload_ms={avg_upload_ms:.1f} avg_build_ms={avg_build_ms:.1f} avg_gpu_build_ms={avg_gpu_build_ms:.1f} "
-            f"avg_gpu_preprocess_ms={avg_gpu_preprocess_ms:.1f} avg_gpu_gen_ms={avg_gpu_gen_ms:.1f} avg_flush_ms={avg_flush_ms:.1f} "
+            f"avg_upload_ms={avg_upload_ms:.1f} avg_build_ms={avg_build_ms:.1f} avg_flush_ms={avg_flush_ms:.1f} "
             f"avg_late_ms={avg_lateness_ms:.1f} avg_bytes={int(avg_bytes)} "
             f"slowest_build_pane={slowest_build_pane}:{slowest_build_ms:.1f}ms "
-            f"slowest_gpu_build_pane={slowest_gpu_build_pane}:{slowest_gpu_build_ms:.1f}ms "
             f"slowest_flush_pane={slowest_pane}:{slowest_ms:.1f}ms {pane_bytes_text}"
         ),
         file=sys.stderr,
@@ -1487,8 +1234,6 @@ def open_panes(
                     spec,
                     str(args.render_mode).lower(),
                     int(args.quadrant_cell_divisor),
-                    int(args.octant_cell_width_divisor),
-                    int(args.octant_cell_height_divisor),
                 ),
                 build_stream=build_stream,
                 copy_stream=copy_stream,
@@ -1612,17 +1357,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     audio_process = None
     frame_reader = None
-    timing_handle = None
     stats = RuntimeStats(pane_ids=pane_ids, window_started_at=time.perf_counter())
     build_time_ema = 0.0
     flush_time_ema = 0.0
     try:
         for pane in panes:
             write_all(pane.fd, INIT_SEQUENCE)
-
-        if args.timing_file:
-            timing_handle = open(args.timing_file, "w", encoding="utf-8")
-            timing_handle.write(timing_csv_header(pane_ids))
 
         frame_reader = LatestFrameReader(
             video_path,
@@ -1669,7 +1409,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         (
             first_payloads,
             first_pane_build_times,
-            first_preprocess_gpu_timing,
             first_next_previous_frame,
         ) = build_shared_pane_payloads_with_stats(
             panes,
@@ -1700,15 +1439,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             shared_runtime=shared_runtime,
             shared_next_previous_frame=first_next_previous_frame,
         )
-        first_gpu_preprocess_time = shared_gpu_preprocess_time(
-            first_preprocess_gpu_timing
-        )
-        first_pane_gpu_gen_times = gpu_gen_times_by_pane(first_payloads)
-        first_pane_gpu_build_times = gpu_build_times_by_pane(first_payloads)
-        first_gpu_build_time = shared_gpu_build_time(first_preprocess_gpu_timing) + sum(
-            first_pane_gpu_build_times.values()
-        )
-        first_gpu_gen_time = sum(first_pane_gpu_gen_times.values())
         first_present_at = time.perf_counter()
         first_lateness = max(0.0, first_present_at - first_target_time)
         stats.record(
@@ -1717,11 +1447,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             fetch_time=first_fetch_time,
             upload_time=first_upload_time,
             build_time=first_build_time,
-            gpu_build_time=first_gpu_build_time,
-            gpu_preprocess_time=first_gpu_preprocess_time,
-            gpu_gen_time=first_gpu_gen_time,
             pane_build_times=first_pane_build_times,
-            pane_gpu_build_times=first_pane_gpu_build_times,
             sleep_time=first_sleep,
             flush_stats=first_flush_stats,
             lateness=first_lateness,
@@ -1732,25 +1458,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         previous_frame_idx = first_frame_idx
         playback_frame_idx += 1
 
-        if timing_handle is not None:
-            timing_handle.write(
-                timing_csv_row(
-                    first_frame_idx,
-                    False,
-                    first_skipped_input_frames,
-                    first_fetch_time,
-                    first_upload_time,
-                    first_build_time,
-                    first_gpu_build_time,
-                    first_pane_build_times,
-                    first_pane_gpu_build_times,
-                    first_sleep,
-                    first_flush_stats,
-                    first_lateness,
-                    first_payload_bytes,
-                    pane_ids,
-                )
-            )
         emit_runtime_stats(stats, first_present_at, float(args.stats_interval), fps)
 
         while True:
@@ -1771,43 +1478,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 float(args.max_frame_lag),
                 lead_time=build_time_ema + flush_time_ema,
             ):
-                if timing_handle is not None:
-                    empty_flush_stats = FlushStats(
-                        total_time=0.0,
-                        per_pane_times={pane_id: 0.0 for pane_id in pane_ids},
-                    )
-                    empty_pane_build_times = {pane_id: 0.0 for pane_id in pane_ids}
-                    empty_pane_gpu_build_times = {pane_id: 0.0 for pane_id in pane_ids}
-                    empty_payload_bytes = {pane_id: 0 for pane_id in pane_ids}
-                    timing_handle.write(
-                        timing_csv_row(
-                            frame_idx,
-                            True,
-                            skipped_input_frames,
-                            fetch_time,
-                            0.0,
-                            0.0,
-                            0.0,
-                            empty_pane_build_times,
-                            empty_pane_gpu_build_times,
-                            0.0,
-                            empty_flush_stats,
-                            0.0,
-                            empty_payload_bytes,
-                            pane_ids,
-                        )
-                    )
                 stats.record(
                     dropped=True,
                     skipped_input_frames=skipped_input_frames,
                     fetch_time=fetch_time,
                     upload_time=0.0,
                     build_time=0.0,
-                    gpu_build_time=0.0,
-                    gpu_preprocess_time=0.0,
-                    gpu_gen_time=0.0,
                     pane_build_times={pane_id: 0.0 for pane_id in pane_ids},
-                    pane_gpu_build_times={pane_id: 0.0 for pane_id in pane_ids},
                     sleep_time=0.0,
                     flush_stats=FlushStats(
                         total_time=0.0,
@@ -1842,7 +1519,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             (
                 payloads,
                 pane_build_times,
-                preprocess_gpu_timing,
                 next_previous_frame,
             ) = build_shared_pane_payloads_with_stats(
                 panes,
@@ -1870,13 +1546,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 shared_runtime=shared_runtime,
                 shared_next_previous_frame=next_previous_frame,
             )
-            gpu_preprocess_time = shared_gpu_preprocess_time(preprocess_gpu_timing)
-            pane_gpu_gen_times = gpu_gen_times_by_pane(payloads)
-            pane_gpu_build_times = gpu_build_times_by_pane(payloads)
-            gpu_build_time = shared_gpu_build_time(preprocess_gpu_timing) + sum(
-                pane_gpu_build_times.values()
-            )
-            gpu_gen_time = sum(pane_gpu_gen_times.values())
             presented_at = time.perf_counter()
             lateness = max(0.0, presented_at - target_time)
             stats.record(
@@ -1885,11 +1554,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 fetch_time=fetch_time,
                 upload_time=upload_time,
                 build_time=build_time,
-                gpu_build_time=gpu_build_time,
-                gpu_preprocess_time=gpu_preprocess_time,
-                gpu_gen_time=gpu_gen_time,
                 pane_build_times=pane_build_times,
-                pane_gpu_build_times=pane_gpu_build_times,
                 sleep_time=sleep_time,
                 flush_stats=flush_stats,
                 lateness=lateness,
@@ -1909,25 +1574,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             playback_frame_idx += 1
 
-            if timing_handle is not None:
-                timing_handle.write(
-                    timing_csv_row(
-                        frame_idx,
-                        False,
-                        skipped_input_frames,
-                        fetch_time,
-                        upload_time,
-                        build_time,
-                        gpu_build_time,
-                        pane_build_times,
-                        pane_gpu_build_times,
-                        sleep_time,
-                        flush_stats,
-                        lateness,
-                        frame_payload_bytes,
-                        pane_ids,
-                    )
-                )
             emit_runtime_stats(
                 stats,
                 presented_at,
@@ -1941,9 +1587,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(str(exc), file=sys.stderr, flush=True)
         return 1
     finally:
-        if timing_handle is not None:
-            timing_handle.flush()
-            timing_handle.close()
         if audio_process is not None:
             audio_process.terminate()
             audio_process.wait()

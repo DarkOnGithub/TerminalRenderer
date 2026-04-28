@@ -70,12 +70,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--depth", type=float, default=DEFAULT_DEPTH)
     parser.add_argument(
         "--render-mode",
-        choices=("pixel", "quadrant", "octant"),
+        choices=("pixel", "quadrant"),
         default="quadrant",
     )
     parser.add_argument("--quadrant-cell-divisor", type=int, default=2)
-    parser.add_argument("--octant-cell-width-divisor", type=int, default=2)
-    parser.add_argument("--octant-cell-height-divisor", type=int, default=4)
     parser.add_argument("--launcher", default="./open_four_alacritty.sh")
     parser.add_argument("--session-dir")
     parser.add_argument(
@@ -256,20 +254,11 @@ def build_config(args: argparse.Namespace) -> Config:
         height=int(args.height),
         device=DEVICE,
         fps=float(args.fps),
-        timing_enabled=False,
-        timing_file="timing_object.csv",
         render_mode=str(args.render_mode),
         quadrant_cell_divisor=int(args.quadrant_cell_divisor),
-        octant_cell_width_divisor=int(args.octant_cell_width_divisor),
-        octant_cell_height_divisor=int(args.octant_cell_height_divisor),
         diff_thresh=0,
         quant_mask=0xFF,
         run_color_diff_thresh=0,
-        adaptive_quality=False,
-        target_frame_bytes=0,
-        frame_byte_buffer_frames=4,
-        max_frame_bytes=0,
-        write_chunk_size=2_097_152,
         use_rep=True,
         rep_min_run=4,
     )

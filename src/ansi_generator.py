@@ -1,4 +1,3 @@
-import torch
 # pyright: reportGeneralTypeIssues=false
 
 import torch
@@ -14,7 +13,6 @@ from .config import (
     SEP_VAL,
     Config,
 )
-from .glyph_tables import OCTANT_GLYPHS
 
 
 @triton.jit
@@ -556,9 +554,6 @@ def _max_run_length_for_config(cfg: Config) -> int:
     if render_mode == "quadrant":
         divisor = max(1, int(getattr(cfg, "quadrant_cell_divisor", 2)))
         width = (width + divisor - 1) // divisor
-    elif render_mode == "octant":
-        divisor = max(1, int(getattr(cfg, "octant_cell_width_divisor", 2)))
-        width = (width + divisor - 1) // divisor
 
     return ((width + 31) // 32) * 32
 
@@ -584,19 +579,9 @@ def ansi_generate(
             cfg,
             run_color_diff_thresh_override=run_color_diff_thresh_override,
         )
-    if mode == "octant":
-        return ansi_generate_octant(
-            xs,
-            ys,
-            colors,
-            byte_vals,
-            byte_lens,
-            cfg,
-            run_color_diff_thresh_override=run_color_diff_thresh_override,
-        )
     if mode != "pixel":
         raise ValueError(
-            f"Unsupported render mode '{mode}'. Supported modes: pixel, quadrant, octant"
+            f"Unsupported render mode '{mode}'. Supported modes: pixel, quadrant"
         )
 
     return ansi_generate_rgb(
@@ -929,34 +914,6 @@ def _ensure_quadrant_lookup(cfg: Config, device: torch.device) -> None:
     cfg._quadrant_lookup_device = device
 
 
-def _ensure_octant_lookup(cfg: Config, device: torch.device) -> None:
-    if (
-        hasattr(cfg, "_octant_lookup_bytes")
-        and hasattr(cfg, "_octant_lookup_lens")
-        and getattr(cfg, "_octant_lookup_device", None) == device
-    ):
-        return
-
-    encoded = [glyph.encode("utf-8") for glyph in OCTANT_GLYPHS]
-    max_len = max(len(bs) for bs in encoded)
-
-    lookup_bytes = torch.zeros(
-        (len(encoded), max_len), dtype=torch.uint8, device=device
-    )
-    lookup_lens = torch.empty(len(encoded), dtype=torch.int64, device=device)
-
-    for idx, bs in enumerate(encoded):
-        if bs:
-            lookup_bytes[idx, : len(bs)] = torch.tensor(
-                list(bs), dtype=torch.uint8, device=device
-            )
-        lookup_lens[idx] = len(bs)
-
-    cfg._octant_lookup_bytes = lookup_bytes
-    cfg._octant_lookup_lens = lookup_lens
-    cfg._octant_lookup_device = device
-
-
 def _build_block_runs(
     xs_sorted: torch.Tensor,
     ys_sorted: torch.Tensor,
@@ -1279,281 +1236,6 @@ def ansi_generate_quadrant(
         byte_lens,
         cfg._quadrant_lookup_bytes,
         cfg._quadrant_lookup_lens,
-        out_buffer,
-        num_runs,
-        lookup_max_len,
-        glyph_lookup_max_len,
-        ESC_VALS[0],
-        ESC_VALS[1],
-        SEP_VAL,
-        CUR_END_VAL,
-        65,
-        66,
-        67,
-        68,
-        98,
-        FG_COL_PREF_VALS[0],
-        FG_COL_PREF_VALS[1],
-        FG_COL_PREF_VALS[2],
-        FG_COL_PREF_VALS[3],
-        FG_COL_PREF_VALS[4],
-        FG_COL_PREF_VALS[5],
-        FG_COL_PREF_VALS[6],
-        COL_PREF_VALS[0],
-        COL_PREF_VALS[1],
-        COL_PREF_VALS[2],
-        COL_PREF_VALS[3],
-        COL_PREF_VALS[4],
-        COL_PREF_VALS[5],
-        COL_PREF_VALS[6],
-        MAX_RUN_LENGTH=max_run_length,
-        BLOCK_SIZE=block_size,
-        GLYPH_BLOCK_SIZE=glyph_lookup_max_len,
-        num_warps=num_warps,
-    )
-
-    out_buffer[total_len_all_val:] = cfg._ansi_reset_tensor
-
-    return out_buffer
-
-
-def ansi_generate_octant(
-    xs: torch.Tensor,
-    ys: torch.Tensor,
-    styles: torch.Tensor,
-    byte_vals: torch.Tensor,
-    byte_lens: torch.Tensor,
-    cfg: Config,
-    run_color_diff_thresh_override: int | None = None,
-) -> torch.Tensor:
-    N = xs.numel()
-    if N == 0:
-        return torch.tensor(RESET_VALS, dtype=torch.uint8, device=cfg.device)
-
-    device = cfg.device
-    _ensure_common_buffers(cfg, device)
-    _ensure_octant_lookup(cfg, device)
-
-    xs_sorted = xs
-    ys_sorted = ys
-    styles_sorted = styles
-
-    run_color_diff_thresh = max(
-        0,
-        int(
-            cfg.run_color_diff_thresh
-            if run_color_diff_thresh_override is None
-            else run_color_diff_thresh_override
-        ),
-    )
-    (
-        num_runs,
-        run_lengths,
-        run_xs,
-        run_ys,
-        run_fg,
-        run_bg,
-        run_glyph_idx,
-        needs_style_change,
-    ) = _build_block_runs(xs_sorted, ys_sorted, styles_sorted, run_color_diff_thresh)
-
-    needs_move = torch.ones(num_runs, dtype=torch.bool, device=device)
-    if num_runs > 1:
-        same_row = run_ys[1:] == run_ys[:-1]
-        continuous_x = run_xs[1:] == (run_xs[:-1] + run_lengths[:-1])
-        needs_move[1:] = ~(same_row & continuous_x)
-
-    run_fg_r = run_fg[:, 0].to(torch.int64)
-    run_fg_g = run_fg[:, 1].to(torch.int64)
-    run_fg_b = run_fg[:, 2].to(torch.int64)
-    run_bg_r = run_bg[:, 0].to(torch.int64)
-    run_bg_g = run_bg[:, 1].to(torch.int64)
-    run_bg_b = run_bg[:, 2].to(torch.int64)
-
-    row_idx = run_ys + 1
-    col_idx = run_xs + 1
-    row_lens = byte_lens[row_idx].to(torch.int64)
-    col_lens = byte_lens[col_idx].to(torch.int64)
-
-    fg_r_lens = byte_lens[run_fg_r].to(torch.int64)
-    fg_g_lens = byte_lens[run_fg_g].to(torch.int64)
-    fg_b_lens = byte_lens[run_fg_b].to(torch.int64)
-    bg_r_lens = byte_lens[run_bg_r].to(torch.int64)
-    bg_g_lens = byte_lens[run_bg_g].to(torch.int64)
-    bg_b_lens = byte_lens[run_bg_b].to(torch.int64)
-
-    relative_cursor_moves = bool(getattr(cfg, "relative_cursor_moves", True))
-    if not relative_cursor_moves:
-        move_kind = needs_move.to(torch.int8)
-        move_v = row_idx
-        move_h = col_idx
-        move_lens = (2 + row_lens + 1 + col_lens + 1) * needs_move.to(torch.int64)
-    else:
-        move_kind = torch.zeros(num_runs, dtype=torch.int8, device=device)
-        move_v = torch.zeros(num_runs, dtype=torch.int64, device=device)
-        move_h = torch.zeros(num_runs, dtype=torch.int64, device=device)
-
-        move_kind[0] = 1
-        move_v[0] = row_idx[0]
-        move_h[0] = col_idx[0]
-
-        if num_runs > 1:
-            move_indices = torch.where(needs_move[1:])[0] + 1
-            move_kind[move_indices] = 1
-            move_v[move_indices] = row_idx[move_indices]
-            move_h[move_indices] = col_idx[move_indices]
-
-            prev_rows = run_ys[move_indices - 1]
-            prev_cols_after = run_xs[move_indices - 1] + run_lengths[move_indices - 1]
-            dy = run_ys[move_indices] - prev_rows
-            dx = run_xs[move_indices] - prev_cols_after
-
-            abs_dx = torch.abs(dx)
-            abs_dy = torch.abs(dy)
-            dx_lens = byte_lens[abs_dx.to(torch.long)].to(torch.int64)
-            dy_lens = byte_lens[abs_dy.to(torch.long)].to(torch.int64)
-
-            abs_lens = 2 + row_lens[move_indices] + 1 + col_lens[move_indices] + 1
-            large = torch.full_like(abs_lens, 1 << 30)
-            h_lens = torch.where(dy == 0, 2 + dx_lens + 1, large)
-            v_lens = torch.where(dx == 0, 2 + dy_lens + 1, large)
-            combo_lens = torch.where(
-                (dx != 0) & (dy != 0),
-                (2 + dy_lens + 1) + (2 + dx_lens + 1),
-                large,
-            )
-
-            best = torch.argmin(
-                torch.stack((abs_lens, h_lens, v_lens, combo_lens), dim=1),
-                dim=1,
-            )
-
-            h_choice = best == 1
-            h_indices = move_indices[h_choice]
-            h_dx = dx[h_choice]
-            move_h[h_indices] = torch.abs(h_dx)
-            move_kind[h_indices[h_dx > 0]] = 2
-            move_kind[h_indices[h_dx < 0]] = 3
-
-            v_choice = best == 2
-            v_indices = move_indices[v_choice]
-            v_dy = dy[v_choice]
-            move_v[v_indices] = torch.abs(v_dy)
-            move_kind[v_indices[v_dy > 0]] = 4
-            move_kind[v_indices[v_dy < 0]] = 5
-
-            combo_choice = best == 3
-            combo_indices = move_indices[combo_choice]
-            combo_dx = dx[combo_choice]
-            combo_dy = dy[combo_choice]
-            move_h[combo_indices] = torch.abs(combo_dx)
-            move_v[combo_indices] = torch.abs(combo_dy)
-
-            move_kind[combo_indices[(combo_dy > 0) & (combo_dx > 0)]] = 6
-            move_kind[combo_indices[(combo_dy > 0) & (combo_dx < 0)]] = 7
-            move_kind[combo_indices[(combo_dy < 0) & (combo_dx > 0)]] = 8
-            move_kind[combo_indices[(combo_dy < 0) & (combo_dx < 0)]] = 9
-
-        move_lens = torch.zeros(num_runs, dtype=torch.int64, device=device)
-
-        abs_mask = move_kind == 1
-        move_lens[abs_mask] = 2 + row_lens[abs_mask] + 1 + col_lens[abs_mask] + 1
-
-        h_mask = (move_kind == 2) | (move_kind == 3)
-        h_lens = byte_lens[move_h[h_mask].to(torch.long)].to(torch.int64)
-        move_lens[h_mask] = 2 + h_lens + 1
-
-        v_mask = (move_kind == 4) | (move_kind == 5)
-        v_lens = byte_lens[move_v[v_mask].to(torch.long)].to(torch.int64)
-        move_lens[v_mask] = 2 + v_lens + 1
-
-        combo_mask = move_kind >= 6
-        combo_v_lens = byte_lens[move_v[combo_mask].to(torch.long)].to(torch.int64)
-        combo_h_lens = byte_lens[move_h[combo_mask].to(torch.long)].to(torch.int64)
-        move_lens[combo_mask] = (2 + combo_v_lens + 1) + (2 + combo_h_lens + 1)
-
-    fg_len_full = 7 + fg_r_lens + 1 + fg_g_lens + 1 + fg_b_lens + 1
-    bg_len_full = 7 + bg_r_lens + 1 + bg_g_lens + 1 + bg_b_lens + 1
-    style_part = (fg_len_full + bg_len_full) * needs_style_change.to(torch.int64)
-
-    glyph_lens = cfg._octant_lookup_lens[run_glyph_idx].to(torch.int64)
-    use_rep = bool(getattr(cfg, "use_rep", False))
-    rep_min_run = max(2, int(getattr(cfg, "rep_min_run", 12)))
-    if use_rep:
-        use_rep_run = run_lengths >= rep_min_run
-        rep_counts = (run_lengths - 1).clamp_min(0).to(torch.long)
-        rep_count_lens = byte_lens[rep_counts].to(torch.int64)
-        payload_lens = torch.where(
-            use_rep_run, glyph_lens + 2 + rep_count_lens + 1, glyph_lens * run_lengths
-        )
-    else:
-        use_rep_run = torch.zeros(num_runs, dtype=torch.bool, device=device)
-        payload_lens = glyph_lens * run_lengths
-
-    total_lens = move_lens + style_part + payload_lens
-
-    total_len_all = total_lens.sum(dtype=torch.int64)
-    offsets = torch.empty(num_runs, dtype=torch.int64, device=device)
-    offsets[0] = 0
-    if num_runs > 1:
-        offsets[1:] = total_lens.cumsum(dim=0)[:-1]
-
-    reset_len = len(RESET_VALS)
-    total_len_all_val = int(total_len_all.item())
-    total_size_needed_val = total_len_all_val + reset_len
-    if cfg._ansi_out_buffer.size(0) < total_size_needed_val:
-        cfg._ansi_out_buffer = torch.empty(
-            int(total_size_needed_val * 1.2), dtype=torch.uint8, device=device
-        )
-
-    out_buffer = cfg._ansi_out_buffer[:total_size_needed_val]
-
-    lookup_max_len = byte_vals.size(1)
-    glyph_lookup_max_len = cfg._octant_lookup_bytes.size(1)
-    max_run_length = _max_run_length_for_config(cfg)
-    grid = (num_runs,)
-    block_size = min(lookup_max_len, 64)
-
-    num_warps_raw = min(8, max(1, num_runs // 32))
-    num_warps = 1
-    if num_warps_raw >= 8:
-        num_warps = 8
-    elif num_warps_raw >= 4:
-        num_warps = 4
-    elif num_warps_raw >= 2:
-        num_warps = 2
-
-    ansi_quadrant_kernel[grid](
-        run_fg_r,
-        run_fg_g,
-        run_fg_b,
-        run_bg_r,
-        run_bg_g,
-        run_bg_b,
-        run_glyph_idx,
-        run_lengths,
-        offsets,
-        move_kind,
-        move_v,
-        move_h,
-        needs_style_change,
-        use_rep_run,
-        byte_vals,
-        byte_lens,
-        byte_vals,
-        byte_lens,
-        byte_vals,
-        byte_lens,
-        byte_vals,
-        byte_lens,
-        byte_vals,
-        byte_lens,
-        byte_vals,
-        byte_lens,
-        byte_vals,
-        byte_lens,
-        cfg._octant_lookup_bytes,
-        cfg._octant_lookup_lens,
         out_buffer,
         num_runs,
         lookup_max_len,
