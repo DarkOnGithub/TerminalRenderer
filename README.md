@@ -70,8 +70,8 @@ Choose what to render with a subcommand:
 
 ```bash
 uv run terminal-renderer video
-uv run terminal-renderer video video.mp4"
-uv run terminal-renderer video --terminal-mode multi video.mp4"
+uv run terminal-renderer video video.mp4
+uv run terminal-renderer video --terminal-mode multi video.mp4
 
 uv run terminal-renderer cube
 uv run terminal-renderer cube --terminal-mode multi --width 1280 --height 720
@@ -204,17 +204,3 @@ render_with_terminal_mode(
 )
 ```
 
-## Project Layout
-
-- `main.py`: CLI entry point and subcommand dispatch
-- `src/demos/video.py`: video playback implementation
-- `src/demos/cube.py`: procedural cube frame source
-- `src/demos/shader.py`: offscreen GLSL shader frame source
-- `src/demos/common.py`: shared CLI and demo configuration helpers
-- `src/terminal_router.py`: single vs multi terminal routing
-- `src/multi_pane.py`: reusable four-pane renderer
-- `src/ansi_renderer.py`: single-terminal render loop, buffering, and output writing
-- `src/frame_processing.py`: resize, diffing, and mode-specific preprocessing
-- `src/ansi_generator.py`: Triton kernels and ANSI sequence generation
-- `src/config.py`: runtime configuration and ANSI constants
-- `example/shaders/`: sample shader files
