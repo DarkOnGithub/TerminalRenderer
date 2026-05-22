@@ -9,7 +9,7 @@ Current render modes:
 
 Notes:
 - This project currently targets CUDA/NVIDIA workflows.
-- Multi-pane mode uses the Alacritty launcher scripts in this repo.
+- Multi-pane mode uses four independent terminal windows by default.
 
 ## Demos
 
@@ -45,7 +45,6 @@ Source: https://www.youtube.com/watch?v=ftHQEd0QApc
 - NVIDIA GPU + CUDA-capable PyTorch build
 - A fast terminal emulator, such as Alacritty, Kitty, or WezTerm
 - FFmpeg tools available in `PATH`: `ffmpeg`, `ffprobe`, `ffplay`
-
 Shader rendering also uses `moderngl` and `glcontext`, which are included in the project dependencies.
 
 ## Installation
@@ -96,6 +95,23 @@ Multi-pane options:
 - `--sync-mode pane|global|off`
 - `--cell-aspect`
 - `--stats-interval`
+
+The default launcher is `./open_four_terminals.sh`. It creates four independent
+terminal windows, so frame flushing can happen in parallel. The launcher avoids
+compositor-specific placement APIs for window creation and works across X11 and
+Wayland. Placement is manual by default. KDE Wayland placement is available
+through KWin scripting when explicitly requested; other compositors currently
+require manual tiling or compositor/window rules.
+It uses the first available terminal from `TERMINAL`, Alacritty, Kitty, WezTerm,
+Foot, Konsole, GNOME Terminal, or xterm. You can pass a different launcher with
+`--launcher`.
+
+Launcher placement options:
+
+```bash
+./open_four_terminals.sh --placement manual
+./open_four_terminals.sh --placement kde-wayland
+```
 
 ## Shader Support
 
@@ -178,7 +194,7 @@ def frame_generator():
         yield torch.zeros((720, 1280, 3), dtype=torch.uint8, device=torch.device("cuda"))
 
 cfg = Config(width=1280, height=720, device=torch.device("cuda"), render_mode="quadrant")
-options = MultiPaneOptions(launcher="./open_four_alacritty.sh", sync_mode="pane")
+options = MultiPaneOptions(launcher="./open_four_terminals.sh", sync_mode="pane")
 
 render_with_terminal_mode(
     frame_generator(),

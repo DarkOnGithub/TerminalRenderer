@@ -40,7 +40,7 @@ class PaneDisconnectedError(RuntimeError):
 
 @dataclass
 class MultiPaneOptions:
-    launcher: str = "./open_four_alacritty.sh"
+    launcher: str = "./open_four_terminals.sh"
     session_dir: str | None = None
     sync_mode: str = "pane"
     cell_aspect: float = CELL_ASPECT

@@ -66,7 +66,7 @@ def add_render_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_multi_pane_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--launcher", default="./open_four_alacritty.sh")
+    parser.add_argument("--launcher", default="./open_four_terminals.sh")
     parser.add_argument("--session-dir")
     parser.add_argument(
         "--sync-mode",
