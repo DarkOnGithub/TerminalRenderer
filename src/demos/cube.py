@@ -1,23 +1,18 @@
 import argparse
 import math
-import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Generator
 
 import torch
 
-try:
-    from src.config import Config, DEVICE
-    from src.multi_pane import MultiPaneOptions
-    from src.terminal_router import render_with_terminal_mode
-except ModuleNotFoundError:
-    ROOT_DIR = Path(__file__).resolve().parent.parent
-    if str(ROOT_DIR) not in sys.path:
-        sys.path.insert(0, str(ROOT_DIR))
-    from src.config import Config, DEVICE
-    from src.multi_pane import MultiPaneOptions
-    from src.terminal_router import render_with_terminal_mode
+from src.config import Config, DEVICE
+from src.demos.common import (
+    add_multi_pane_args,
+    add_render_args,
+    build_multi_pane_options,
+    build_render_config,
+)
+from src.terminal_router import render_with_terminal_mode
 
 FPS = 60
 DEFAULT_WIDTH = 1280
@@ -58,30 +53,10 @@ class SceneSettings:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Render the procedural cube demo.")
-    parser.add_argument(
-        "--terminal-mode",
-        choices=("single", "multi"),
-        default="single",
-        help="Render into one terminal or a multi-pane launcher session.",
-    )
-    parser.add_argument("--width", type=int, default=DEFAULT_WIDTH)
-    parser.add_argument("--height", type=int, default=DEFAULT_HEIGHT)
     parser.add_argument("--fps", type=int, default=FPS)
     parser.add_argument("--depth", type=float, default=DEFAULT_DEPTH)
-    parser.add_argument(
-        "--render-mode",
-        choices=("pixel", "quadrant"),
-        default="quadrant",
-    )
-    parser.add_argument("--quadrant-cell-divisor", type=int, default=2)
-    parser.add_argument("--launcher", default="./open_four_alacritty.sh")
-    parser.add_argument("--session-dir")
-    parser.add_argument(
-        "--sync-mode",
-        choices=("pane", "global", "off"),
-        default="pane",
-    )
-    parser.add_argument("--cell-aspect", type=float, default=0.5)
+    add_render_args(parser)
+    add_multi_pane_args(parser)
     return parser.parse_args(argv)
 
 
@@ -249,42 +224,28 @@ def frame_generator(
 
 
 def build_config(args: argparse.Namespace) -> Config:
-    return Config(
-        width=int(args.width),
-        height=int(args.height),
-        device=DEVICE,
-        fps=float(args.fps),
-        render_mode=str(args.render_mode),
-        quadrant_cell_divisor=int(args.quadrant_cell_divisor),
-        diff_thresh=0,
-        quant_mask=0xFF,
-        run_color_diff_thresh=0,
-        use_rep=True,
-        rep_min_run=4,
-    )
+    return build_render_config(args)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+def run(args: argparse.Namespace) -> int:
     settings = SceneSettings(
         width=int(args.width),
         height=int(args.height),
         fps=int(args.fps),
         depth=float(args.depth),
     )
-    multi_pane_options = MultiPaneOptions(
-        launcher=str(args.launcher),
-        session_dir=str(args.session_dir) if args.session_dir else None,
-        sync_mode=str(args.sync_mode),
-        cell_aspect=float(args.cell_aspect),
-    )
     render_with_terminal_mode(
         frame_generator(settings),
         build_config(args),
         terminal_mode=str(args.terminal_mode),
-        multi_pane_options=multi_pane_options,
+        multi_pane_options=build_multi_pane_options(args),
     )
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    return run(args)
 
 
 if __name__ == "__main__":

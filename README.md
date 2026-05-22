@@ -1,15 +1,15 @@
 # TerminalRenderer
 
-TerminalRenderer is a GPU-accelerated terminal video renderer built with PyTorch + Triton.
-It renders RGB frames as ANSI escape sequences and streams them directly to your terminal.
-In practice, it can handle 720p-equivalent output and 1080p vertical content (hardware and terminal dependent).
+TerminalRenderer is a GPU-accelerated terminal renderer built with PyTorch and Triton.
+It converts RGB frames into ANSI escape sequences and can render videos, procedural scenes, and GLSL shaders into either one terminal or a four-pane terminal layout.
 
-Current render modes in this repo:
+Current render modes:
 - `pixel`
 - `quadrant`
 
 Notes:
 - This project currently targets CUDA/NVIDIA workflows.
+- Multi-pane mode uses the Alacritty launcher scripts in this repo.
 
 ## Demos
 
@@ -22,6 +22,7 @@ Notes:
 Source: https://youtu.be/7995X3B275g
 
 ### 3D Cube
+
 <video src="https://github.com/user-attachments/assets/0991a9a2-b65a-462a-bd22-da86c4ae1fe9" controls width="480"></video>
 
 Source: https://youtu.be/7Zr2gqd8iPI
@@ -42,15 +43,80 @@ Source: https://www.youtube.com/watch?v=ftHQEd0QApc
 
 - Python `>=3.13`
 - NVIDIA GPU + CUDA-capable PyTorch build
-- A fast terminal emulator (Alacritty/Kitty/WezTerm recommended)
-- FFmpeg tools available in `PATH`:
-  - `ffmpeg`
-  - `ffprobe`
-  - `ffplay`
+- A fast terminal emulator, such as Alacritty, Kitty, or WezTerm
+- FFmpeg tools available in `PATH`: `ffmpeg`, `ffprobe`, `ffplay`
 
-### Alacritty preset (720p, quadrant, divisor 2)
+Shader rendering also uses `moderngl` and `glcontext`, which are included in the project dependencies.
 
-Use this in your Alacritty config for a fullscreen, borderless setup tuned for 720p with `render_mode="quadrant"` and `quadrant_cell_divisor=2`:
+## Installation
+
+```bash
+uv venv .venv
+source .venv/bin/activate
+
+# Example for CUDA 12.8. Pick the build that matches your system.
+uv pip install torch --index-url https://download.pytorch.org/whl/cu128
+uv pip install -e .
+```
+
+## CLI
+
+`main.py` is the user entry point. The installed command is:
+
+```bash
+uv run terminal-renderer --help
+```
+
+Choose what to render with a subcommand:
+
+```bash
+uv run terminal-renderer video
+uv run terminal-renderer video video.mp4"
+uv run terminal-renderer video --terminal-mode multi video.mp4"
+
+uv run terminal-renderer cube
+uv run terminal-renderer cube --terminal-mode multi --width 1280 --height 720
+
+uv run terminal-renderer shader
+uv run terminal-renderer shader example/shaders/plasma.frag --terminal-mode multi
+```
+
+Common render options:
+- `--terminal-mode single|multi`
+- `--width` / `--height`
+- `--render-mode pixel|quadrant`
+- `--quadrant-cell-divisor`
+- `--diff-thresh`
+- `--run-color-diff-thresh`
+- `--quant-mask`
+
+Multi-pane options:
+- `--launcher`
+- `--session-dir`
+- `--sync-mode pane|global|off`
+- `--cell-aspect`
+- `--stats-interval`
+
+## Shader Support
+
+Shader files can be regular GLSL fragment shaders or simple Shadertoy-style shaders. The wrapper provides these uniforms when referenced:
+
+```glsl
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform vec3 iResolution;
+uniform float iTime;
+uniform float iTimeDelta;
+uniform int iFrame;
+uniform float iFrameRate;
+uniform vec4 iMouse;
+```
+
+It also supports shaders that define `mainImage(out vec4 fragColor, in vec2 fragCoord)` and shaders that write to `gl_FragColor`.
+
+## Alacritty Presets
+
+Single-terminal 720p quadrant preset:
 
 ```toml
 [font]
@@ -65,7 +131,7 @@ startup_mode = "Fullscreen"
 padding = { x = 0, y = 0 }
 ```
 
-For a 720p quadrant multi-pane setup aimed at higher frame rate, use a tight grid like this:
+Four-pane 720p quadrant preset:
 
 ```toml
 [font]
@@ -82,99 +148,7 @@ startup_mode = "Windowed"
 padding = { x = 0, y = 0 }
 ```
 
-## Installation (uv)
-
-1) Create a virtual environment with `uv` (activation is optional; `uv run` will auto-use `.venv`)
-
-```bash
-uv venv .venv
-source .venv/bin/activate
-```
-
-2) Install a CUDA-enabled PyTorch build (pick your CUDA version)
-
-```bash
-# example (CUDA 12.8)
-uv pip install torch --index-url https://download.pytorch.org/whl/cu128
-```
-
-3) Install project dependencies
-
-```bash
-uv pip install -e .
-```
-
-## Run
-
-### Demo router
-
-Use the shared CLI to choose the demo and whether it renders in one terminal or a multi-pane launcher session:
-
-```bash
-uv run terminal-renderer-demo video --terminal-mode single
-uv run terminal-renderer-demo video --terminal-mode multi -- path/to/video.mp4 --stats-interval 0.5
-uv run terminal-renderer-demo object --terminal-mode single
-uv run terminal-renderer-demo object --terminal-mode multi -- --width 1280 --height 720
-uv run terminal-renderer-demo shader --terminal-mode single
-uv run terminal-renderer-demo shader --terminal-mode multi -- example/shaders/plasma.frag --width 1280 --height 720
-```
-
-Arguments after `--` are forwarded to the selected demo.
-
-Multi-pane mode is useful when you want higher frame rate by splitting the output across multiple terminals.
-
-### Video demo (`video_demo.py`)
-
-```bash
-uv run video_demo.py path/to/video.mp4
-```
-
-This demo:
-- decodes frames with FFmpeg
-- plays audio with `ffplay`
-- renders into one terminal with `AnsiRenderer`
-
-### 3D cube demo (`example/object.py`)
-
-```bash
-uv run python -m example.object --terminal-mode multi
-```
-
-This is a procedural GPU-rendered cube scene and it can now render to either a single terminal or the reusable multi-pane path.
-
-### Shader demo (`example/shader.py`)
-
-```bash
-uv run python -m example.shader
-uv run python -m example.shader example/shaders/plasma.frag --terminal-mode multi
-```
-
-This demo renders an offscreen GLSL fragment shader with `moderngl`, reads the result back as an `H x W x 3` RGB frame, and feeds that frame into TerminalRenderer.
-
-Shader files can be either regular GLSL fragment shaders or simple Shadertoy-style shaders. The wrapper provides these uniforms when referenced:
-
-```glsl
-uniform vec2 u_resolution;
-uniform float u_time;
-uniform vec3 iResolution;
-uniform float iTime;
-uniform float iTimeDelta;
-uniform int iFrame;
-uniform float iFrameRate;
-uniform vec4 iMouse;
-```
-
-It also supports shaders that define `mainImage(out vec4 fragColor, in vec2 fragCoord)` and shaders that write to `gl_FragColor`.
-
-### Timing analysis
-
-If you enable timing in config, analyze the CSV with:
-
-```bash
-uv run analyze_timing.py timing_object.csv 1
-```
-
-## Minimal API usage
+## API Usage
 
 Single terminal:
 
@@ -185,14 +159,13 @@ from src.terminal_router import render_single_terminal
 
 def frame_generator():
     while True:
-        # H x W x 3, uint8, device should match config.device
         yield torch.zeros((720, 1280, 3), dtype=torch.uint8, device=torch.device("cuda"))
 
 cfg = Config(width=1280, height=720, device=torch.device("cuda"), render_mode="pixel")
 render_single_terminal(frame_generator(), cfg)
 ```
 
-Reusable multi-pane rendering from any frame source:
+Reusable multi-pane rendering:
 
 ```python
 import torch
@@ -205,24 +178,27 @@ def frame_generator():
         yield torch.zeros((720, 1280, 3), dtype=torch.uint8, device=torch.device("cuda"))
 
 cfg = Config(width=1280, height=720, device=torch.device("cuda"), render_mode="quadrant")
-options = MultiPaneOptions(
-    launcher="./open_four_alacritty.sh",
-    sync_mode="pane",
-    stats_interval=0.5,
-)
+options = MultiPaneOptions(launcher="./open_four_alacritty.sh", sync_mode="pane")
 
-render_with_terminal_mode(frame_generator(), cfg, terminal_mode="multi", multi_pane_options=options)
+render_with_terminal_mode(
+    frame_generator(),
+    cfg,
+    terminal_mode="multi",
+    multi_pane_options=options,
+)
 ```
 
-Set `stats_interval` to print reusable multi-pane runtime stats to stderr every N seconds. Use `0` to disable them.
+## Project Layout
 
-## Project layout
-
-- `src/ansi_renderer.py`: render loop, pacing, buffering, output writing
+- `main.py`: CLI entry point and subcommand dispatch
+- `src/demos/video.py`: video playback implementation
+- `src/demos/cube.py`: procedural cube frame source
+- `src/demos/shader.py`: offscreen GLSL shader frame source
+- `src/demos/common.py`: shared CLI and demo configuration helpers
+- `src/terminal_router.py`: single vs multi terminal routing
+- `src/multi_pane.py`: reusable four-pane renderer
+- `src/ansi_renderer.py`: single-terminal render loop, buffering, and output writing
 - `src/frame_processing.py`: resize, diffing, and mode-specific preprocessing
 - `src/ansi_generator.py`: Triton kernels and ANSI sequence generation
 - `src/config.py`: runtime configuration and ANSI constants
-- `cli.py`: demo router for single-terminal vs multi-pane playback
-- `video_demo.py`: single-terminal video playback demo
-- `example/object.py`: procedural cube demo
-- `example/shader.py`: offscreen GLSL shader demo via ModernGL
+- `example/shaders/`: sample shader files
