@@ -53,11 +53,11 @@ def build_config(
         audio_path=video_path,
         render_mode="quadrant",
         quadrant_cell_divisor=2,
-        quant_mask=0xFF,
-        diff_thresh=0,
-        run_color_diff_thresh=0,
+        quant_mask=0xFC,
+        diff_thresh=6,
+        run_color_diff_thresh=6,
         relative_cursor_moves=True,
-        use_rep=False,
+        use_rep=True,
         rep_min_run=12,
         sync_output=True,
     )
@@ -130,9 +130,15 @@ def run_video_demo(args: argparse.Namespace) -> int:
         config=config,
         autostart=False,
     )
-    frame_reader = LatestFrameReader(video_path, source_width, source_height)
+    frame_reader = LatestFrameReader(
+        video_path,
+        source_width,
+        source_height,
+        realtime=True,
+        pause_after_first_frame=True,
+    )
     previous_frame: torch.Tensor | None = None
-    playback_frame_idx = 0
+    decoder_resumed = False
     build_time_ema = 0.0
     flush_time_ema = 0.0
 
@@ -142,7 +148,7 @@ def run_video_demo(args: argparse.Namespace) -> int:
             if item is None:
                 break
 
-            _, frame_np = item
+            playback_frame_idx, frame_np = item
 
             if renderer.start_time is not None and should_drop_frame(
                 time.perf_counter(),
@@ -186,6 +192,9 @@ def run_video_demo(args: argparse.Namespace) -> int:
                 copy_done_event.synchronize()
             if output_view is not None:
                 renderer.render_frame(output_view, playback_frame_idx)
+                if not decoder_resumed:
+                    frame_reader.resume()
+                    decoder_resumed = True
             flush_time = time.perf_counter() - flush_start
 
             previous_frame = next_previous_frame
@@ -204,7 +213,6 @@ def run_video_demo(args: argparse.Namespace) -> int:
                 if flush_time_ema <= 0.0
                 else ((1.0 - alpha) * flush_time_ema + alpha * flush_time)
             )
-            playback_frame_idx += 1
     except KeyboardInterrupt:
         print("\nInterrupted by user. Exiting...")
         return 130

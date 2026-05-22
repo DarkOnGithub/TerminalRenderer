@@ -48,6 +48,8 @@ class LatestFrameReader:
         output_width: int | None = None,
         output_height: int | None = None,
         vf: str | None = None,
+        realtime: bool = False,
+        pause_after_first_frame: bool = False,
     ):
         self.width = width
         self.height = height
@@ -56,15 +58,18 @@ class LatestFrameReader:
         self.frame_bytes = self.output_width * self.output_height * 3
         self.queue: queue.Queue[DecodedFrame | None] = queue.Queue(maxsize=2)
         self.stop_event = threading.Event()
+        self.resume_event = threading.Event()
+        self.pause_after_first_frame = pause_after_first_frame
         self.done = False
         self.error: Exception | None = None
         cmd = [
             "ffmpeg",
             "-v",
             "error",
-            "-i",
-            path,
         ]
+        if realtime:
+            cmd.append("-re")
+        cmd.extend(["-i", path])
         if vf:
             cmd.extend(["-vf", vf])
         cmd.extend(
@@ -111,6 +116,10 @@ class LatestFrameReader:
                 )
                 self._put_latest(DecodedFrame(frame_idx=frame_idx, frame_np=frame_np))
                 frame_idx += 1
+                if self.pause_after_first_frame and frame_idx == 1:
+                    while not self.stop_event.is_set():
+                        if self.resume_event.wait(timeout=0.05):
+                            break
         except Exception as exc:
             self.error = exc
         finally:
@@ -131,8 +140,12 @@ class LatestFrameReader:
                 return None
             return item.frame_idx, item.frame_np
 
+    def resume(self) -> None:
+        self.resume_event.set()
+
     def close(self) -> None:
         self.stop_event.set()
+        self.resume_event.set()
         try:
             if self.proc.stdout is not None:
                 self.proc.stdout.close()

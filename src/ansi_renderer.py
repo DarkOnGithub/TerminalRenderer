@@ -184,24 +184,9 @@ class AnsiRenderer:
         if frame is None:
             return
 
+        first_render = self.start_time is None
         if self.start_time is None:
-            if self.config.audio_path:
-                self.audio_process = subprocess.Popen(
-                    [
-                        "ffplay",
-                        "-nodisp",
-                        "-autoexit",
-                        "-loglevel",
-                        "quiet",
-                        "-vn",
-                        "-sn",
-                        self.config.audio_path,
-                    ],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
             os.write(self.config.output_fd, b"\033[?1049h\033[2J\033[?25l\033[H")
-            self.start_time = time.perf_counter()
             self._output_initialized = True
 
         pending_event = self._pending_copy_done_event
@@ -238,6 +223,24 @@ class AnsiRenderer:
                 self._write_all(fd, self._sync_end_view, 0)
         else:
             self._write_all(fd, view, WRITE_CHUNK_SIZE)
+
+        if first_render:
+            if self.config.audio_path:
+                self.audio_process = subprocess.Popen(
+                    [
+                        "ffplay",
+                        "-nodisp",
+                        "-autoexit",
+                        "-loglevel",
+                        "quiet",
+                        "-vn",
+                        "-sn",
+                        self.config.audio_path,
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            self.start_time = time.perf_counter()
 
         self.rendered_frames += 1
 
