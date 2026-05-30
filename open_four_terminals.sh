@@ -16,7 +16,7 @@ Options:
   --session-dir DIR  Directory for FIFOs, logs, and session.json.
   --terminal CMD     Terminal command to launch. Defaults to $TERMINAL, then
                      alacritty, kitty, wezterm, foot, konsole, gnome-terminal, xterm.
-  --placement MODE   manual or kde-wayland. Default: manual.
+    --placement MODE   manual or kde-wayland. Default: $PLACEMENT or manual.
 EOF
 }
 
@@ -29,7 +29,7 @@ require_cmd() {
 
 session_dir=""
 terminal_cmd="${TERMINAL:-}"
-placement="manual"
+placement="${PLACEMENT:-manual}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

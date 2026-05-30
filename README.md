@@ -75,6 +75,7 @@ uv run terminal-renderer video --terminal-mode multi video.mp4
 
 uv run terminal-renderer cube
 uv run terminal-renderer cube --terminal-mode multi --width 1280 --height 720
+PLACEMENT=kde-wayland uv run terminal-renderer cube --terminal-mode multi
 
 uv run terminal-renderer shader
 uv run terminal-renderer shader example/shaders/plasma.frag --terminal-mode multi
